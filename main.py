@@ -1,96 +1,111 @@
 import discord
 from discord.ext import commands
 import datetime
-import re
 import asyncio
+import os
+import sys
 
-# --- 설정 (Config) ---
-TOKEN = "YOUR_BOT_TOKEN_HERE"
-LOG_CHANNEL_ID = 123456789012345678  # 로그를 남길 채널 ID
-MIN_ACCOUNT_AGE_DAYS = 3  # 계정 생성 제한일
-ALLOWED_LINKS = ["discord.gg/my-server"] # 허용된 링크 리스트
+# --- CHUNZA SECURITY TOOL INFO ---
+VERSION = "v1.3.0"
+AUTHOR = "CHUNZA"
 
+def clear_screen():
+    # 터미널 화면을 깨끗하게 정리합니다.
+    os.system('clear' if os.name == 'posix' else 'cls')
+
+def print_banner():
+    clear_screen()
+    banner = f"""
+    #################################################
+    #                                               #
+    #         CHUNZA SECURITY TOOL {VERSION}          #
+    #         ----------------------------          #
+    #    [ SYSTEM ] : SECURE PROTOCOL ACTIVE        #
+    #    [ AUTHOR ] : {AUTHOR}                     #
+    #                                               #
+    #################################################
+    """
+    print(banner)
+
+# --- 1. TOOL STARTUP & INPUT PHASE ---
+print_banner()
+print(f"[*] {AUTHOR} Security Tool is starting up...")
+print("-" * 49)
+
+# 여기서 먼저 입력을 받습니다.
+USER_TOKEN = input("[>] Enter your Discord Bot Token: ").strip()
+USER_GUILD_ID = input("[>] Enter your Target Server ID: ").strip()
+
+print("-" * 49)
+print("[*] Validating credentials and connecting to Discord...")
+
+# --- 2. BOT CONFIGURATION ---
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# --- 1. 입장 및 신원 인증 (Anti-Raid & Auth) ---
+# Global Variables
+TARGET_GUILD_ID = None
+try:
+    TARGET_GUILD_ID = int(USER_GUILD_ID)
+except ValueError:
+    print("[!] Error: Server ID must be numeric. Please restart.")
+    sys.exit()
+
+# --- 3. SECURITY FUNCTIONS ---
+
+@bot.event
+async def on_ready():
+    print(f"[*] Login Successful: {bot.user}")
+    print(f"[*] Monitoring Server ID: {TARGET_GUILD_ID}")
+    print(f"[*] {AUTHOR} Security is now ARMED.")
+
 @bot.event
 async def on_member_join(member):
-    # 계정 생성일 제한
+    if member.guild.id != TARGET_GUILD_ID: return
+
+    # Anti-Raid: Account Age Check (3 days)
     now = datetime.datetime.now(datetime.timezone.utc)
-    account_age = now - member.created_at
-    if account_age.days < MIN_ACCOUNT_AGE_DAYS:
-        await member.send(f"Your account is too new ({account_age.days} days). Min requirement: {MIN_ACCOUNT_AGE_DAYS} days.")
-        await member.kick(reason="New account protection")
-        return
+    age = now - member.created_at
+    if age.days < 3:
+        try:
+            await member.send(f"[{AUTHOR}] Access Denied: Account age policy.")
+        except: pass
+        await member.kick(reason="Anti-Raid: New Account")
+        print(f"[-] Kicked: {member.name} (Age: {age.days}d)")
 
-    # 캡차(CAPTCHA) 및 역할 부여
-    await member.send("Welcome to CHUNZA Security. Please complete the verification.")
-    # 실제 구현 시 캡차 이미지를 생성하여 전송하는 로직이 추가됩니다.
-
-# --- 2. 채팅 및 콘텐츠 필터링 (Anti-Spam & Content) ---
-user_messages = {}
-
+# Anti-Spam & Link Filter
 @bot.event
 async def on_message(message):
-    if message.author.bot: return
+    if message.author.bot or message.guild.id != TARGET_GUILD_ID: return
 
-    # 스팸 방지 (5초 내 5개 메시지)
-    user_id = message.author.id
-    if user_id not in user_messages:
-        user_messages[user_id] = []
-    user_messages[user_id].append(datetime.datetime.now())
-
-    recent_msgs = [m for m in user_messages[user_id] if (datetime.datetime.now() - m).seconds < 5]
-    if len(recent_msgs) > 5:
-        await message.channel.send(f"{message.author.mention}, Stop spamming!", delete_after=3)
-        await message.delete()
-        return
-
-    # 링크 차단
-    if "https://" in message.content or "http://" in message.content:
-        if not any(link in message.content for link in ALLOWED_LINKS):
+    # Link Filter
+    if "discord.gg/" in message.content.lower() or "http" in message.content.lower():
+        if not message.author.guild_permissions.administrator:
             await message.delete()
-            await message.channel.send("Unauthorized links are prohibited.", delete_after=5)
             return
 
     await bot.process_commands(message)
 
-# --- 3. 서버 관리 및 모니터링 (Moderation & Log) ---
-@bot.event
-async def on_member_remove(member):
-    log_channel = bot.get_channel(LOG_CHANNEL_ID)
-    embed = discord.Embed(title="Member Left", color=discord.Color.red())
-    embed.add_field(name="User", value=f"{member.name} ({member.id})")
-    await log_channel.send(embed=embed)
-
+# Role & Admin Monitoring
 @bot.event
 async def on_guild_role_create(role):
-    log_channel = bot.get_channel(LOG_CHANNEL_ID)
+    if role.guild.id != TARGET_GUILD_ID: return
     if role.permissions.administrator:
-        await log_channel.send(f"⚠️ **WARNING**: New Admin role created: {role.name}")
+        print(f"[ALERT] High Privilege Role Created: {role.name}")
 
-# --- 4. 위협 탐지 (Threat Detection) ---
 @bot.event
 async def on_member_update(before, after):
-    # 관리자 권한 변동 감시
+    if after.guild.id != TARGET_GUILD_ID: return
     if not before.guild_permissions.administrator and after.guild_permissions.administrator:
-        log_channel = bot.get_channel(LOG_CHANNEL_ID)
-        await log_channel.send(f"🚨 **CRITICAL**: {after.mention} granted Administrator permissions!")
+        print(f"[CRITICAL] Admin Granted to: {after.name}")
 
-# --- CHUNZA Banner ---
-@bot.event
-async def on_ready():
-    banner = f"""
-    #########################################
-    #          CHUNZA SECURITY TOOL         #
-    #    -------------------------------    #
-    #    Status: ONLINE                     #
-    #    User: {bot.user}             #
-    #########################################
-    """
-    print(banner)
-
-# Replit run 버튼을 누르지 않아도 되도록 실행 코드는 유지하되, Termux에서 실행 시 적용됩니다.
+# --- 4. EXECUTION ---
 if __name__ == "__main__":
-    bot.run(TOKEN)
+    try:
+        # 입력받은 토큰으로 봇을 실행합니다.
+        bot.run(USER_TOKEN)
+    except discord.errors.LoginFailure:
+        print("\n[!] LOGIN FAILED: The token you entered is invalid.")
+        print("[!] Please check your token at Discord Developer Portal.")
+    except Exception as e:
+        print(f"\n[!] AN ERROR OCCURRED: {e}")
