@@ -5,24 +5,24 @@ import asyncio
 import os
 import sys
 import json
+from threading import Thread
+from flask import Flask
 
-# --- [1] 정보 및 색상 설정 ---
+# --- [1] 기본 정보 및 컬러 설정 ---
 VERSION = "v1.5.0"
 AUTHOR = "CHUNZA"
+CYAN, RED, GREEN, YELLOW, RESET, BOLD = "\033[96m", "\033[91m", "\033[92m", "\033[93m", "\033[0m", "\033[1m"
 DATA_FILE = "server_data.json"
 
-CYAN = "\033[96m"
-RED = "\033[91m"
-GREEN = "\033[92m"
-YELLOW = "\033[93m"
-RESET = "\033[0m"
-BOLD = "\033[1m"
-
-# --- [2] 데이터 로드/저장 ---
+# --- [2] 데이터 관리 시스템 (설정 및 데이터 저장 필수) ---
 db = {
-    "admins": [681815009466253416], # 초기 관리자 ID
-    "master_id": 731129858629042187,
-    "vote_ch_id": None,
+    "admins": [681815009466253416], # 기본 관리자 ID
+    "master_id": 731129858629042187, # 개발자(Master) ID
+    "channels": {
+        "vote": 1501240737352646728,
+        "suggestion": 1501199686932103199,
+        "verify": 1501199548880650331
+    },
     "active_votes": {}
 }
 
@@ -38,21 +38,27 @@ def save_data():
     with open(DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(db, f, indent=4, ensure_ascii=False)
 
-# --- [3] UI 및 배너 ---
-def print_banner():
+# --- [3] UI 및 시스템 함수 ---
+def clear_screen():
     os.system('clear' if os.name == 'posix' else 'cls')
-    print(f"""{CYAN}{BOLD}
+
+def print_banner():
+    clear_screen()
+    banner = f"""
+{CYAN}{BOLD}
     ██████╗██╗  ██╗██╗   ██╗███╗   ██╗███████╗ █████╗ 
    ██╔════╝██║  ██║██║   ██║████╗  ██║╚══███╔╝██╔══██╗
    ██║     ███████║██║   ██║██╔██╗ ██║  ███╔╝ ███████║
    ██║     ██╔══██║██║   ██║██║╚██╗██║ ███╔╝  ██╔══██║
    ╚██████╗██║  ██║╚██████╔╝██║ ╚████║███████╗██║  ██║
-    ╚═════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝{RESET}
-          {YELLOW}>> CHUNZA GRAND UPDATE | {VERSION} <<{RESET}
-          {YELLOW}>> SECURITY & MANAGEMENT CORE ACTIVE <<{RESET}
-    """)
+    ╚═════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝
+{RESET}
+          {YELLOW}>> SYSTEM INTEGRATED | VERSION: {VERSION} <<{RESET}
+          {YELLOW}>>        CHUNZA MULTI-TOOL READY         <<{RESET}
+    """
+    print(banner)
 
-# --- [4] 봇 초기 설정 ---
+# --- [4] 봇 초기 설정 및 입력 ---
 print_banner()
 TOKEN = input(f"{CYAN}[>] INPUT BOT TOKEN: {RESET}").strip()
 GUILD_INPUT = input(f"{CYAN}[>] INPUT TARGET SERVER ID: {RESET}").strip()
@@ -65,183 +71,159 @@ except:
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
-spam_data = {}
 
-# --- [5] 권한 체크 유틸리티 ---
-def is_auth(user_id):
-    return user_id == db["master_id"] or user_id in db["admins"]
+# 권한 체크 함수
+def is_auth(user):
+    return user.id == db["master_id"] or user.id in db["admins"]
 
-# --- [6] 이벤트 핸들러 ---
+# --- [5] 메인 이벤트 (보안 및 관리) ---
 @bot.event
 async def on_ready():
     load_data()
     print_banner()
     print(f"{GREEN}[+] CHUNZA ONLINE: {bot.user}{RESET}")
-    print(f"{GREEN}[+] MASTER ID: {db['master_id']}{RESET}")
-    print(f"{CYAN}[!] SECURITY SYSTEMS ARMED.{RESET}\n")
-
-@bot.event
-async def on_member_join(member):
-    if member.guild.id != TARGET_GUILD_ID: return
-    # 신규 계정 보호 (3일)
-    age = datetime.datetime.now(datetime.timezone.utc) - member.created_at
-    if age.days < 3:
-        await member.kick(reason="CHUNZA: New Account Protection")
-        print(f"{RED}[KICK] {member.name} (Age: {age.days}d){RESET}")
+    print(f"{GREEN}[+] MONITORING ID: {TARGET_GUILD_ID}{RESET}")
 
 @bot.event
 async def on_message(message):
     if message.author.bot or not message.guild: return
     if message.guild.id != TARGET_GUILD_ID: return
 
-    # 투표 채널 잡채팅 자동 삭제
-    if db["vote_ch_id"] and message.channel.id == db["vote_ch_id"]:
-        if not message.content.startswith('!'):
-            await asyncio.sleep(0.5)
-            await message.delete()
-            return
-
-    # 스팸 방지 (3초 4회)
-    uid = message.author.id
-    now = datetime.datetime.now()
-    if uid not in spam_data: spam_data[uid] = []
-    spam_data[uid].append(now)
-    spam_data[uid] = [t for t in spam_data[uid] if (now - t).total_seconds() < 3]
-
-    if len(spam_data[uid]) > 4:
-        await message.delete()
-        if not is_auth(uid):
-            await message.channel.send(f"**{message.author.name}**, [CHUNZA] STOP SPAMMING.", delete_after=2)
-            print(f"{RED}[SPAM] {message.author.name}{RESET}")
-            return
-
-    # 링크 차단
-    if "http" in message.content.lower() or "discord.gg/" in message.content.lower():
-        if not is_auth(uid):
-            await message.delete()
-            print(f"{YELLOW}[LINK] {message.author.name}{RESET}")
+    # 투표 채널 관리 (명령어 외 메시지 삭제)
+    if message.channel.id == db["channels"]["vote"] and not message.content.startswith('!'):
+        await asyncio.sleep(0.5); await message.delete(); return
 
     await bot.process_commands(message)
 
-@bot.event
-async def on_raw_reaction_add(p):
-    if p.user_id == bot.user.id: return
-    msg_id = str(p.message_id)
-    if msg_id not in db["active_votes"]: return
+# --- [6] 명령어 리스트 (도움말) ---
+@bot.command(name="명령어")
+async def help_cmd(ctx):
+    embed = discord.Embed(title=f"🛡️ {AUTHOR} SYSTEM COMMANDS", color=0x3498db)
+    embed.add_field(name="🌐 일반 유저 (General)", value="`!문의 (내용)` - 개발자 건의\n`!현황` - 시민 수 확인\n`!투표 (주제)` - 익명 투표\n`!결과` - 투표 조기 종료", inline=False)
+    embed.add_field(name="🛡️ 관리자 전용 (Staff)", value="`!청소 (수)` `!추방 @유저` `!차단 @유저` `!잠금` `!해제` `!삭제` `!생성 (카테고리ID) (이름)` `!백업` `!복구`", inline=False)
+    embed.add_field(name="👑 개발자 (Master)", value="`!권한부여 @유저` `!권한해제 @유저`", inline=False)
+    await ctx.reply(embed=embed)
 
-    vote_data = db["active_votes"][msg_id]
-    emoji = str(p.emoji)
-    if emoji not in ["⭕", "❌"]: return
-
-    guild = bot.get_guild(p.guild_id)
-    channel = bot.get_channel(p.channel_id)
-    user = guild.get_member(p.user_id)
-
-    # 반응 삭제 (익명성 유지)
-    try:
-        msg = await channel.fetch_message(p.message_id)
-        await msg.remove_reaction(p.emoji, user)
-    except: pass
-
-    if str(p.user_id) in vote_data["voters"]: return
-
-    vote_data["voters"][str(p.user_id)] = emoji
-    vote_data[emoji] += 1
-
-    # 임베드 업데이트
-    embed = msg.embeds[0]
-    embed.set_field_at(0, name="YES (⭕)", value=f"{vote_data['⭕']} Votes", inline=True)
-    embed.set_field_at(1, name="NO (❌)", value=f"{vote_data['❌']} Votes", inline=True)
-    await msg.edit(embed=embed)
-
-    # 마스터에게 로그 전송
-    master = await bot.fetch_user(db["master_id"])
-    await master.send(f"📊 [VOTE] {user.name} voted {emoji} | Topic: {vote_data['topic']}")
-
-# --- [7] 명령어서 - 투표 및 관리 ---
-
-@bot.command(name="투표채널")
-async def set_vote_ch(ctx):
-    if not is_auth(ctx.author.id): return
-    db["vote_ch_id"] = ctx.channel.id
-    save_data()
-    await ctx.send(f"{GREEN}[CHUNZA] Vote channel set to {ctx.channel.mention}{RESET}")
-
-@bot.command(name="투표")
-async def start_vote(ctx, *, topic=None):
-    if not db["vote_ch_id"] or ctx.channel.id != db["vote_ch_id"]:
-        return await ctx.send("❌ Use the designated vote channel.", delete_after=3)
-    if not topic: return await ctx.send("📝 Enter a topic.", delete_after=3)
-
-    q = await ctx.send("⏰ Duration? (e.g., '1분' or '2일')")
-    def check(m): return m.author == ctx.author and m.channel == ctx.channel
-    try:
-        msg = await bot.wait_for('message', timeout=20.0, check=check)
-        time_str = msg.content
-        if '분' in time_str: sec = int(time_str.replace('분','')) * 60
-        elif '일' in time_str: sec = int(time_str.replace('일','')) * 86400
-        else: raise Exception()
-        await msg.delete(); await q.delete()
-    except:
-        return await ctx.send("⌛ Vote Cancelled.", delete_after=3)
-
-    embed = discord.Embed(title="🗳️ ANONYMOUS VOTE", description=f"**Topic: {topic}**", color=0x3498db)
-    embed.add_field(name="YES (⭕)", value="0 Votes", inline=True)
-    embed.add_field(name="NO (❌)", value="0 Votes", inline=True)
-    embed.set_footer(text=f"Ends in: {time_str} | By: {ctx.author.name}")
-
-    v_msg = await ctx.send(embed=embed)
-    await v_msg.add_reaction("⭕")
-    await v_msg.add_reaction("❌")
-
-    db["active_votes"][str(v_msg.id)] = {
-        "topic": topic, "⭕": 0, "❌": 0, "voters": {}, 
-        "author_id": ctx.author.id, "channel_id": ctx.channel.id
-    }
-    await ctx.message.delete()
-
-    await asyncio.sleep(sec)
-    await end_vote(v_msg.id)
-
-async def end_vote(msg_id):
-    data = db["active_votes"].pop(str(msg_id), None)
-    if not data: return
-    channel = bot.get_channel(data["channel_id"])
-    try:
-        res = f"🏁 **VOTE ENDED: {data['topic']}**\n⭕ YES: {data['⭕']} | ❌ NO: {data['❌']}"
-        await channel.send(res)
-        msg = await channel.fetch_message(msg_id)
-        await msg.delete()
-    except: pass
-
-@bot.command(name="청소")
-async def clear(ctx, amount: int = 10):
-    if not is_auth(ctx.author.id): return
-    await ctx.channel.purge(limit=amount + 1)
-    print(f"{CYAN}[CLEAN] {ctx.author.name} cleared {amount} messages.{RESET}")
-
+# --- [7] 관리 및 권한 명령어 ---
 @bot.command(name="권한부여")
 async def add_admin(ctx, member: discord.Member):
     if ctx.author.id != db["master_id"]: return
     if member.id not in db["admins"]:
-        db["admins"].append(member.id)
-        save_data(); await ctx.send(f"✅ {member.mention} is now Admin.")
+        db["admins"].append(member.id); save_data()
+        await ctx.reply(f"✅ {member.mention} 님이 CHUNZA 관리자로 등록되었습니다.")
+    else: await ctx.reply("이미 관리자입니다.")
 
-# --- [8] 보안 모니터링 ---
-@bot.event
-async def on_guild_role_create(role):
-    if role.guild.id != TARGET_GUILD_ID: return
-    if role.permissions.administrator:
-        print(f"{RED}[CRITICAL] ADMIN ROLE CREATED: {role.name}{RESET}")
+@bot.command(name="권한해제")
+async def remove_admin(ctx, member: discord.Member):
+    if ctx.author.id != db["master_id"]: return
+    if member.id in db["admins"]:
+        db["admins"].remove(member.id); save_data()
+        await ctx.reply(f"❌ {member.mention} 님의 관리자 권한이 해제되었습니다.")
 
-@bot.event
-async def on_member_update(before, after):
-    if after.guild.id != TARGET_GUILD_ID: return
-    if not before.guild_permissions.administrator and after.guild_permissions.administrator:
-        print(f"{RED}[ALERT] ADMIN PRIVILEGE GRANTED: {after.name}{RESET}")
+@bot.command(name="청소")
+async def clear(ctx, amount: int = 10):
+    if not is_auth(ctx.author): return
+    deleted = await ctx.channel.purge(limit=amount + 1)
+    await ctx.send(f"🧹 {len(deleted)-1} Messages Cleared.", delete_after=3)
+
+@bot.command(name="잠금")
+async def lock(ctx, channel: discord.TextChannel = None):
+    if not is_auth(ctx.author): return
+    target = channel or ctx.channel
+    await target.set_permissions(ctx.guild.default_role, send_messages=False)
+    await ctx.reply(f"🔒 {target.mention} Locked.")
+
+@bot.command(name="해제")
+async def unlock(ctx, channel: discord.TextChannel = None):
+    if not is_auth(ctx.author): return
+    target = channel or ctx.channel
+    await target.set_permissions(ctx.guild.default_role, send_messages=None)
+    await ctx.reply(f"🔓 {target.mention} Unlocked.")
+
+@bot.command(name="추방")
+async def kick(ctx, member: discord.Member):
+    if not is_auth(ctx.author): return
+    await member.kick(); await ctx.reply(f"👢 {member.display_name} Kicked.")
+
+@bot.command(name="차단")
+async def ban(ctx, member: discord.Member):
+    if not is_auth(ctx.author): return
+    await member.ban(); await ctx.reply(f"🔨 {member.display_name} Banned.")
+
+@bot.command(name="삭제")
+async def delete_ch(ctx, channel: discord.TextChannel = None):
+    if not is_auth(ctx.author): return
+    target = channel or ctx.channel
+    await target.delete()
+
+@bot.command(name="생성")
+async def create(ctx, cat_id: int, *, name):
+    if not is_auth(ctx.author): return
+    cat = bot.get_channel(cat_id)
+    new_ch = await ctx.guild.create_text_channel(name, category=cat)
+    await ctx.reply(f"📂 {new_ch.mention} Created.")
+
+# --- [8] 투표 및 기타 시스템 ---
+@bot.command(name="투표")
+async def start_vote(ctx, *, topic=None):
+    if ctx.channel.id != db["channels"]["vote"]: return
+    if not topic: return await ctx.reply("주제를 입력하세요.")
+
+    q = await ctx.reply("⏰ 투표 기간 (예: 1분, 2일)")
+    try:
+        def check(m): return m.author == ctx.author and m.channel == ctx.channel
+        msg = await bot.wait_for('message', timeout=30.0, check=check)
+        t_str = msg.content; await msg.delete(); await q.delete()
+        sec = int(t_str.replace('분',''))*60 if '분' in t_str else int(t_str.replace('일',''))*84600
+    except: return await ctx.reply("입력 오류.")
+
+    embed = discord.Embed(title="🗳️ 익명 투표", description=f"**주제: {topic}**", color=0xf1c40f)
+    v_msg = await ctx.send(embed=embed); await v_msg.add_reaction("⭕"); await v_msg.add_reaction("❌")
+
+    db["active_votes"][str(v_msg.id)] = {"topic":topic, "⭕":0, "❌":0, "author_id":ctx.author.id, "channel_id":ctx.channel.id}
+    await asyncio.sleep(sec); await end_vote_logic(v_msg.id)
+
+async def end_vote_logic(msg_id):
+    data = db["active_votes"].pop(str(msg_id), None)
+    if not data: return
+    try:
+        ch = bot.get_channel(data["channel_id"])
+        m = await ch.fetch_message(msg_id)
+        # 반응 집계
+        for r in m.reactions:
+            if str(r.emoji) == "⭕": data["⭕"] = r.count - 1
+            if str(r.emoji) == "❌": data["❌"] = r.count - 1
+        await ch.send(f"🏁 **투표 결과**\n주제: {data['topic']}\n⭕: {data['⭕']} | ❌: {data['❌']}")
+        await m.delete()
+    except: pass
+
+@bot.command(name="현황")
+async def status(ctx): await ctx.reply(f"📊 현재 시민 수: **{ctx.guild.member_count}명**")
+
+@bot.command(name="문의")
+async def contact(ctx, *, content=None):
+    if ctx.channel.id != db["channels"]["suggestion"] or not content: return
+    master = await bot.fetch_user(db["master_id"])
+    await master.send(f"📩 [{ctx.author}] 문의: {content}")
+    await ctx.message.delete(); await ctx.send("✅ 건의가 전달되었습니다.", delete_after=2)
+
+@bot.command(name="백업")
+async def backup_cmd(ctx):
+    if not is_auth(ctx.author): return
+    save_data(); await ctx.reply("💾 데이터 백업 완료.")
+
+@bot.command(name="복구")
+async def restore_cmd(ctx):
+    if not is_auth(ctx.author): return
+    load_data(); await ctx.reply("🛠️ 데이터 복구 완료.")
+
+# --- [9] 웹 대시보드 및 실행 ---
+app = Flask(''); @app.route('/')
+def home(): return "CHUNZA Core Active"
+Thread(target=lambda: app.run(host='0.0.0.0', port=8080), daemon=True).start()
 
 if __name__ == "__main__":
     try:
         bot.run(TOKEN)
     except Exception as e:
-        print(f"{RED}[!] ERROR: {e}{RESET}")
+        print(f"{RED}[!] CRITICAL: {e}{RESET}")
