@@ -1,4 +1,4 @@
-# 🛡️ CHUNZA Security & Management System (v1.5.0)
+# 🛡️ CHUNZA Security & Management System (v1.6.0)
 
 ![CHUNZA Banner](https://img.shields.io/badge/CHUNZA-SECURITY-cyan?style=for-the-badge&logo=discord)
 ![Version](https://img.shields.io/badge/Version-1.5.0-yellow?style=for-the-badge)
