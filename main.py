@@ -217,13 +217,23 @@ async def restore_cmd(ctx):
     if not is_auth(ctx.author): return
     load_data(); await ctx.reply("🛠️ 데이터 복구 완료.")
 
-# --- [9] 웹 대시보드 및 실행 ---
-app = Flask(''); @app.route('/')
-def home(): return "CHUNZA Core Active"
-Thread(target=lambda: app.run(host='0.0.0.0', port=8080), daemon=True).start()
+# --- [9] 웹 대시보드 및 실행 (문법 오류 수정 버전) ---
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "CHUNZA Core Active"
+
+def run_app():
+    # Replit 환경 유지용 웹 서버 실행
+    app.run(host='0.0.0.0', port=8080)
+
+# 백그라운드에서 Flask 실행
+Thread(target=run_app, daemon=True).start()
 
 if __name__ == "__main__":
     try:
+        # 입력 단계에서 받은 토큰으로 봇 구동
         bot.run(TOKEN)
     except Exception as e:
-        print(f"{RED}[!] CRITICAL: {e}{RESET}")
+        print(f"{RED}[!] CRITICAL ERROR: {e}{RESET}")
