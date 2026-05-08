@@ -1,7 +1,7 @@
 # 🛡️ CHUNZA Security & Management System (v1.6.0)
 
 ![CHUNZA Banner](https://img.shields.io/badge/CHUNZA-SECURITY-cyan?style=for-the-badge&logo=discord)
-![Version](https://img.shields.io/badge/Version-1.5.0-yellow?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-1.6.0-yellow?style=for-the-badge)
 
 **CHUNZA**는 디스코드 서버의 보안과 관리를 통합적으로 수행하는 강력한 올인원 툴입니다. 
 Termux 및 Replit 환경에 최적화되어 있으며, 실시간 모니터링과 다양한 관리 명령어를 제공합니다.
