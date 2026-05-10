@@ -1,6 +1,5 @@
 import discord
 from discord.ext import commands
-from discord import app_commands
 import os
 import asyncio
 import json
@@ -15,25 +14,64 @@ SUGGESTION_CH_ID = 1501199686932103199
 VERIFY_CH_ID = 1501199548880650331 
 DATA_FILE = "server_data.json"
 
-# --- [2] 봇 클래스 정의 (자동 동기화 포함) ---
+# 봇 인스턴스 설정
+intents = discord.Intents.all()
+
+# 클래스 구조로 변경하여 main.py와 연동을 강화합니다.
 class SecurityBot(commands.Bot):
     def __init__(self):
-        intents = discord.Intents.all()
         super().__init__(command_prefix='!', intents=intents, help_command=None)
-        self.target_guild_id = None # main.py에서 받을 서버 ID 저장용
+        self.target_guild_id = None
 
     async def setup_hook(self):
-        # 서버 ID가 있으면 해당 서버에 즉시 동기화, 없으면 전체 동기화
+        # 봇이 켜질 때 서버 ID가 있으면 해당 서버에 명령어를 즉시 동기화합니다.
         if self.target_guild_id:
             guild = discord.Object(id=int(self.target_guild_id))
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
-            print(f"✅ [보안 봇] 서버({self.target_guild_id}) 명령어 즉시 동기화 완료!")
+            print(f"✅ [보안 봇] 서버({self.target_guild_id}) 명령어 동기화 완료!")
         else:
             await self.tree.sync()
-            print("✅ [보안 봇] 전체 명령어 동기화 완료!")
+            print("✅ [보안 봇] 글로벌 명령어 동기화 완료!")
 
 bot = SecurityBot()
+
+db = {
+    "backup": {}, 
+    "settings": {"verify_role": "시민", "verify_emoji": "✅"}, 
+    "suggestion_msg_id": None,
+    "admins": [681815009466253416],
+    "active_votes": {} 
+}
+
+def load_data():
+    global db
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                db.update(json.load(f))
+        except: pass
+
+def save_data():
+    with open(DATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(db, f, ensure_ascii=False, indent=4)
+
+# --- [가동 함수: main.py에서 호출함] ---
+async def run_bot(token, target_guild_id):
+    load_data()
+    bot.target_guild_id = target_guild_id
+    async with bot:
+        # 절대 bot.run()을 쓰지 마세요. 에러의 원인이 됩니다.
+        await bot.start(token)
+
+# --- [이벤트 및 명령어] ---
+@bot.event
+async def on_ready():
+    print(f"==============================")
+    print(f"🛡️ 보안 봇 가동: {bot.user.name}")
+    print(f"==============================")
+
+# 여기에 기존에 쓰시던 @bot.command나 @bot.event들을 쭉 붙여넣으시면 됩니다.
 
 db = {
     "backup": {}, 
