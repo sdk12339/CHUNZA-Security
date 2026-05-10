@@ -237,3 +237,19 @@ def run_bot(received_token, target_guild_id):
         bot.run(received_token)
     except Exception as e:
         print(f"\n❌ [춘자 봇] 로그인 중 오류 발생: {e}")
+
+# 파일 맨 아래에 이것만 남기세요
+async def run_bot(token, target_guild_id):
+    # bot1은 load_data()를, bot2는 self.load_data()를 사용하는 차이만 유지
+    if hasattr(bot, 'load_data'):
+        if asyncio.iscoroutinefunction(bot.load_data):
+            await bot.load_data()
+        else:
+            bot.load_data()
+            
+    bot.target_guild_id = target_guild_id
+    
+    async with bot:
+        # 핵심: bot.run()이 아니라 await bot.start()를 써야 에러가 안 납니다.
+        await bot.start(token)
+
