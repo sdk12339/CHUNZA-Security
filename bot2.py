@@ -123,8 +123,11 @@ async def give_money(interaction: discord.Interaction):
     bot.save_data()
     await interaction.response.send_message("💰 1,000원을 지원받았다도!")
 
-# --- [실행 함수] ---
-def run_bot():
-    MY_TOKEN = "여기에_봇2_토큰_입력" # 🌸 여기에 토큰을 넣어주세요
-    if MY_TOKEN != "여기에_봇2_토큰_입력":
-        bot.run(MTUwMDM4Nzc4ODU5NDM1MjE2OA.GtGeCO.E-G1OYGIsukJOwZQANeMQHMW6gzuoAAiBZ6cFo)
+# --- [6] 실행 함수 (main.py에서 호출) ---
+def run_bot(received_token, guild_id):
+    # 툴(main.py)에서 넘겨준 토큰으로 로그인을 시도합니다.
+    if received_token:
+        bot.run(received_token)
+    else:
+        print("❌ 툴에서 전달된 토큰이 없습니다. 입력을 확인해주세요.")
+
