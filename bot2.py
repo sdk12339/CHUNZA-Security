@@ -123,15 +123,10 @@ async def give_money(interaction: discord.Interaction):
     bot.save_data()
     await interaction.response.send_message("💰 1,000원을 지원받았다도!")
 
-# ... (기존 코드 생략: 클래스, 명령어 로직은 그대로 두세요) ...
-
-# --- [실행 함수 (main.py에서 호출)] ---
-def run_bot(received_token, guild_id):
-    """
-    main.py에서 전달받은 토큰으로 로그인을 시도합니다.
-    """
+# 기존의 모든 bot.run() 코드를 지우고 이 함수만 남기세요.
+def run_bot(received_token, target_guild_id):
     try:
-        # 봇 인스턴스(bot)의 run 메서드 호출
+        # main.py에서 전달받은 토큰으로만 로그인을 시도합니다.
         bot.run(received_token)
     except Exception as e:
-        print(f"\n❌ [Bot 2] 로그인 실패: {e}")
+        print(f"\n[!] 로그인 오류 발생: {e}")
