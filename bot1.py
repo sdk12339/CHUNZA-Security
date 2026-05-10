@@ -152,8 +152,9 @@ async def contact(ctx, *, content=None):
     await ctx.message.delete(); await ctx.send("✅ 전달 완료.", delete_after=2)
 
 # --- [6] 실행 함수 (main.py에서 호출) ---
-def run_bot():
-    # 여기에 봇 1번의 토큰을 직접 입력하세요
-    MY_TOKEN = "여기에_봇1_토큰_입력" 
-    bot.run(MTUwMDI1NTgzOTI5Mjg4MzA5NQ.G3bNE2.0M8cQLriex4iv2_eO0FFodKbS-kRFpth51MZzc)
-
+def run_bot(received_token, guild_id):
+    # 툴(main.py)에서 넘겨준 토큰으로 로그인을 시도합니다.
+    if received_token:
+        bot.run(received_token)
+    else:
+        print("❌ 툴에서 전달된 토큰이 없습니다. 입력을 확인해주세요.")
