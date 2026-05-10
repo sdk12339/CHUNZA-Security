@@ -6,7 +6,7 @@ import os
 async def start_system():
     os.system('clear')
     print("====================================")
-    print("   🛡️ CHUNZA 통합 시스템 v3.1")
+    print("   🛡️ CHUNZA 통합 시스템 v3.2")
     print("====================================")
     print(" [1] 보안 봇(bot1)만 가동")
     print(" [2] 춘자 봇(bot2)만 가동")
@@ -19,15 +19,13 @@ async def start_system():
 
     tasks = []
     
-    # 보안 봇 설정
     if choice in ['1', '3']:
         print("\n--- [보안 봇 설정] ---")
         t1 = input("▶️ 토큰: ").strip()
         g1 = input("▶️ 서버 ID: ").strip()
-        # 함수 자체를 넘기는 게 아니라 호출한 결과(코루틴)를 넘깁니다.
+        # 함수를 호출하여 코루틴 객체를 tasks에 넣습니다.
         tasks.append(bot1.run_bot(t1, g1))
         
-    # 춘자 봇 설정
     if choice in ['2', '3']:
         print("\n--- [춘자 봇 설정] ---")
         t2 = input("▶️ 토큰: ").strip()
@@ -35,12 +33,13 @@ async def start_system():
         tasks.append(bot2.run_bot(t2, g2))
 
     if tasks:
-        print("\n🚀 봇 연결 중... (충돌 방지 모드)")
-        # gather를 통해 여러 봇을 안전하게 병렬 실행합니다.
+        print("\n🚀 봇 연결 시도 중... (충돌 방지 모드 가동)")
+        # gather를 통해 모든 코루틴을 병렬로 안전하게 실행합니다.
         await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
     try:
+        # 시스템 전체의 유일한 이벤트 루프 시작점입니다.
         asyncio.run(start_system())
     except KeyboardInterrupt:
-        print("\n👋 프로그램을 종료합니다.")
+        print("\n👋 종료합니다.")
