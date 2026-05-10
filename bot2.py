@@ -20,6 +20,7 @@ class ChunzaBot(commands.Bot):
         self.user_data = {} 
         self.market_prices = {"일반": 1000, "슈퍼": 10000, "전설": 100000, "천상": 1000000}
         self.guild_settings = {} 
+        self.target_guild_id = None # main.py에서 받을 서버 ID 저장용
 
     # [데이터 저장/불러오기 로직]
     def load_data(self):
@@ -34,6 +35,51 @@ class ChunzaBot(commands.Bot):
     def save_data(self):
         try:
             with open(DATA_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.user_data, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"❌ 데이터 저장 오류: {e}")
+
+    # [핵심] 명령어 동기화 로직
+    async def setup_hook(self):
+        self.load_data() # 로그인 전 데이터 로드
+        
+        if self.target_guild_id:
+            guild = discord.Object(id=int(self.target_guild_id))
+            self.tree.copy_global_to(guild=guild)
+            await self.tree.sync(guild=guild)
+            print(f"✅ [춘자 봇] 서버({self.target_guild_id}) 명령어 동기화 완료!")
+        else:
+            await self.tree.sync()
+            print("✅ [춘자 봇] 전체 명령어 동기화 완료!")
+
+# 봇 인스턴스 생성
+bot = ChunzaBot()
+
+# --- [가동 함수: main.py에서 호출] ---
+async def run_bot(token, target_guild_id):
+    bot.target_guild_id = target_guild_id
+    async with bot:
+        await bot.start(token)
+
+# --- [이벤트 및 명령어] ---
+@bot.event
+async def on_ready():
+    print(f"==============================")
+    print(f"🌸 춘자 경제 봇 가동: {bot.user.name}")
+    print(f"==============================")
+
+# 가입 명령어 예시 (슬래시 명령어)
+@bot.tree.command(name="가입", description="경제 시스템에 가입합니다.")
+async def join_market(interaction: discord.Interaction):
+    user_id = str(interaction.user.id)
+    if user_id in bot.user_data:
+        await interaction.response.send_message("이미 가입되어 있습니다!", ephemeral=True)
+    else:
+        bot.user_data[user_id] = {"money": 1000, "items": []}
+        bot.save_data()
+        await interaction.response.send_message("가입을 환영합니다! 초기 자금 1000마카롱이 지급되었습니다.")
+
+# 나머지 기존의 경제 명령어(@bot.tree.command 등)를 이 아래에 그대로 붙여넣으세요.
                 json.dump(self.user_data, f, indent=4, ensure_ascii=False)
         except Exception as e:
             print(f"❌ 데이터 저장 오류: {e}")
