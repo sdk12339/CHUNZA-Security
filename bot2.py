@@ -309,14 +309,5 @@ async def admin_get_money(interaction: discord.Interaction, amount: int):
     user["money"] += amount
     await interaction.response.send_message(f"👑 관리자 권한으로 {amount:,}원을 생성했다도!")
 
-# --- [11] 실행부 (Termux) ---
-if __name__ == "__main__":
-    os.system('clear')
-    print("==============================")
-    print("🌸 춘자 봇(bot2) 통합 시스템")
-    token_input = input("▶️ 봇 토큰을 입력하세요: ").strip()
-    print("==============================")
-    if token_input:
-        bot.run(token_input)
-    else:
-        print("❌ 토큰 미입력.")
+# 봇 실행
+bot.run("YOUR_BOT_TOKEN")
