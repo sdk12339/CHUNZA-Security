@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+from discord import app_commands
 import os
 import asyncio
 import json
@@ -14,8 +15,25 @@ SUGGESTION_CH_ID = 1501199686932103199
 VERIFY_CH_ID = 1501199548880650331 
 DATA_FILE = "server_data.json"
 
-intents = discord.Intents.all()
-bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
+# --- [2] 봇 클래스 정의 (자동 동기화 포함) ---
+class SecurityBot(commands.Bot):
+    def __init__(self):
+        intents = discord.Intents.all()
+        super().__init__(command_prefix='!', intents=intents, help_command=None)
+        self.target_guild_id = None # main.py에서 받을 서버 ID 저장용
+
+    async def setup_hook(self):
+        # 서버 ID가 있으면 해당 서버에 즉시 동기화, 없으면 전체 동기화
+        if self.target_guild_id:
+            guild = discord.Object(id=int(self.target_guild_id))
+            self.tree.copy_global_to(guild=guild)
+            await self.tree.sync(guild=guild)
+            print(f"✅ [보안 봇] 서버({self.target_guild_id}) 명령어 즉시 동기화 완료!")
+        else:
+            await self.tree.sync()
+            print("✅ [보안 봇] 전체 명령어 동기화 완료!")
+
+bot = SecurityBot()
 
 db = {
     "backup": {}, 
@@ -34,6 +52,29 @@ def load_data():
         except: pass
 
 def save_data():
+    with open(DATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(db, f, ensure_ascii=False, indent=4)
+
+# --- [3] 가동 함수 (main.py 호출용) ---
+async def run_bot(token, target_guild_id):
+    load_data()
+    bot.target_guild_id = target_guild_id # 서버 ID 전달
+    async with bot:
+        await bot.start(token)
+
+# --- [4] 이벤트 및 명령어 ---
+@bot.event
+async def on_ready():
+    print(f"==============================")
+    print(f"🛡️ 보안 봇 가동: {bot.user.name}")
+    print(f"==============================")
+
+# 예시 슬래시 명령어 (작동 확인용)
+@bot.tree.command(name="핑", description="봇의 상태를 확인합니다.")
+async def ping(interaction: discord.Interaction):
+    await interaction.response.send_message(f"🏓 퐁! 지연시간: {round(bot.latency * 1000)}ms")
+
+# 나머지 기존 명령어들(투표, 건의 등)을 이 아래에 그대로 붙여넣으세요.
     with open(DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(db, f, indent=4, ensure_ascii=False)
 
