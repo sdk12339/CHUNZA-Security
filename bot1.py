@@ -151,10 +151,13 @@ async def contact(ctx, *, content=None):
     await master.send(f"📩 [{ctx.author}] 문의: {content}")
     await ctx.message.delete(); await ctx.send("✅ 전달 완료.", delete_after=2)
 
-# --- [실행 함수] ---
-def run_bot(received_token, target_guild_id):
+sed -i '/bot.run/d' bot1.py
+sed -i '/def run_bot/,$d' bot1.py
+cat << 'EOF' >> bot1.py
+
+def run_bot(token, guild_id):
     try:
-        # main.py에서 넘겨준 토큰으로만 로그인을 시도 (절대 파일에 토큰 적지 마세요)
-        bot.run(received_token)
+        bot.run(token)
     except Exception as e:
-        print(f"\n[!] 로그인 오류: {e}")
+        print(f"  [Bot1] 로그인 에러: {e}")
+EOF
