@@ -4,26 +4,40 @@ from discord import app_commands
 import datetime
 import asyncio
 import os
+import sys
 import json
 import yt_dlp
 import random
 from threading import Thread
 from flask import Flask
 
-# --- [1] 설정 및 데이터 로드 ---
-VERSION = "v1.8.0"
+# --- [1] 기본 정보 및 컬러 설정 ---
+VERSION = "v1.9.0"
 AUTHOR = "CHUNZA"
 CYAN, RED, GREEN, YELLOW, RESET, BOLD = "\033[96m", "\033[91m", "\033[92m", "\033[93m", "\033[0m", "\033[1m"
 DATA_FILE = "server_data.json"
 
+# --- [2] 데이터 및 음악 설정 ---
 db = {
     "admins": [681815009466253416],
     "master_id": 731129858629042187,
     "settings": {"verify_role_name": "시민", "verify_emoji": "✅"},
-    "channels": {"vote": 1501240737352646728, "suggestion": 1501199686932103199, "verify": 1501199548880650331, "music": 0},
+    "channels": {
+        "vote": 1501240737352646728, 
+        "suggestion": 1501199686932103199, 
+        "verify": 1501199548880650331,
+        "music": None,
+        "music_msg": None
+    },
     "active_votes": {},
-    "music_queue": []
+    "vote_logs": {} # 중복 방지용
 }
+
+YDL_OPTIONS = {'format': 'bestaudio/best', 'noplaylist': 'True', 'quiet': True, 'no_warnings': True}
+FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+
+# 음악 상태 관리용
+music_state = {"queue": [], "loop": False}
 
 def load_data():
     global db
@@ -37,16 +51,19 @@ def save_data():
     with open(DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(db, f, indent=4, ensure_ascii=False)
 
-# --- [2] 봇 초기화 ---
-os.system('clear' if os.name == 'posix' else 'cls')
-print(f"{CYAN}{BOLD}>> CHUNZA PRECISION CONTROL SYSTEM <<{RESET}")
-TOKEN = input(f"{CYAN}[>] BOT TOKEN: {RESET}").strip()
-GUILD_ID = int(input(f"{CYAN}[>] SERVER ID: {RESET}").strip())
+def print_banner():
+    os.system('clear' if os.name == 'posix' else 'cls')
+    print(f"{CYAN}{BOLD}\n    ██████╗██╗  ██╗██╗   ██╗███╗   ██╗███████╗ █████╗ \n   ██╔════╝██║  ██║██║   ██║████╗  ██║╚══███╔╝██╔══██╗\n   ██║     ███████║██║   ██║██╔██╗ ██║  ███╔╝ ███████║\n   ██║     ██╔══██║██║   ██║██║╚██╗██║ ███╔╝  ██╔══██║\n   ╚██████╗██║  ██║╚██████╔╝██║ ╚████║███████╗██║  ██║\n    ╚═════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝{RESET}")
+    print(f"          {YELLOW}>> PRECISION CONTROL | {VERSION} <<{RESET}")
+
+# --- [3] 봇 클래스 설정 ---
+print_banner()
+TOKEN = input(f"{CYAN}[>] INPUT BOT TOKEN: {RESET}").strip()
+GUILD_ID = int(input(f"{CYAN}[>] INPUT TARGET SERVER ID: {RESET}").strip())
 
 class ChunzaBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix="!", intents=discord.Intents.all())
-        self.music_loop = False
 
     async def setup_hook(self):
         guild = discord.Object(id=GUILD_ID)
@@ -58,154 +75,163 @@ bot = ChunzaBot()
 def is_auth(interaction: discord.Interaction):
     return interaction.user.id == db["master_id"] or interaction.user.id in db["admins"]
 
-# --- [3] 음악 컨트롤러 기능 ---
-YDL_OPTIONS = {'format': 'bestaudio/best', 'noplaylist': 'True', 'quiet': True}
-FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+# --- [4] 이벤트 핸들러 (음악/심사/투표알림) ---
 
-@bot.tree.command(name="음악채널설정", description="현재 채널을 음악 전용 채널로 설정합니다.")
-async def set_music_ch(interaction: discord.Interaction):
-    if not is_auth(interaction): return
-    db["channels"]["music"] = interaction.channel_id
-    save_data()
-    await interaction.response.send_message("🎵 이 채널이 이제 음악 전용 채널로 지정되었습니다.")
-
-@bot.tree.command(name="재생", description="유튜브 음악을 재생하고 컨트롤러를 생성합니다.")
-async def play(interaction: discord.Interaction, 검색어: str):
-    if not interaction.user.voice: return await interaction.response.send_message("🔊 음성 채널에 먼저 입장하세요!", ephemeral=True)
-    await interaction.response.defer()
+@bot.event
+async def on_message(message):
+    if message.author.bot: return
     
-    vc = interaction.guild.voice_client or await interaction.user.voice.channel.connect()
+    # 전용 음악 채널 채팅 재생
+    if message.channel.id == db["channels"].get("music"):
+        await message.delete() # 입력한 채팅 삭제
+        if not message.author.voice:
+            return await message.channel.send(f"⚠️ {message.author.mention}님, 음성 채널에 먼저 입장하세요.", delete_after=3)
+        
+        query = message.content
+        vc = message.guild.voice_client or await message.author.voice.channel.connect()
+        
+        async with message.channel.typing():
+            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+                try:
+                    info = ydl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
+                    url, title = info['url'], info['title']
+                    music_state["queue"].append({"url": url, "title": title})
+                except:
+                    return await message.channel.send("❌ 검색 실패.", delete_after=3)
+
+        if not vc.is_playing():
+            await play_next(message.guild)
+        else:
+            await update_music_embed(message.guild, f"➕ 대기열 추가: {title}")
+
+    await bot.process_commands(message)
+
+async def play_next(guild):
+    vc = guild.voice_client
+    if not vc or not music_state["queue"]: return
+
+    song = music_state["queue"].pop(0)
+    def after_playing(error):
+        if music_state["loop"]:
+            music_state["queue"].insert(0, song)
+        asyncio.run_coroutine_threadsafe(play_next(guild), bot.loop)
+
+    vc.play(discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTIONS), after=after_playing)
+    await update_music_embed(guild, f"🎵 현재 재생 중: {song['title']}")
+
+async def update_music_embed(guild, status_text):
+    ch = bot.get_channel(db["channels"]["music"])
+    if not ch: return
     
-    with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-        info = ydl.extract_info(f"ytsearch:{검색어}", download=False)['entries'][0]
-        url, title = info['url'], info['title']
-        thumbnail = info.get('thumbnail')
-
-    if vc.is_playing(): vc.stop()
-    vc.play(discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS))
-
-    embed = discord.Embed(title="🎶 현재 재생 중", description=f"**{title}**", color=0x1DB954)
-    if thumbnail: embed.set_thumbnail(url=thumbnail)
-    embed.add_field(name="상태", value="▶️ 재생 중", inline=True)
-    embed.add_field(name="반복", value="❌ 끔", inline=True)
-    embed.set_footer(text="하단 이모지로 조작: 정지 | 반복 | 섞기 | 스킵 | 일시정지")
-
-    msg = await interaction.followup.send(embed=embed)
-    # 컨트롤 이모지 추가
-    control_emojis = ["⏹️", "🔁", "🔀", "⏭️", "⏸️"]
-    for emoji in control_emojis: await msg.add_reaction(emoji)
+    embed = discord.Embed(title="🎶 CHUNZA MUSIC PLAYER", description=status_text, color=0x00ff00)
+    embed.add_field(name="명령어", value="채팅창에 제목이나 링크를 입력하면 재생됩니다.", inline=False)
+    embed.set_footer(text=f"반복 재생: {'ON' if music_state['loop'] else 'OFF'}")
+    
+    # 기존 메시지 수정 또는 새로 생성
+    try:
+        msg = await ch.fetch_message(db["channels"]["music_msg"])
+        await msg.edit(embed=embed)
+    except:
+        msg = await ch.send(embed=embed)
+        db["channels"]["music_msg"] = msg.id
+        save_data()
+        # 이모지 순서: 정지, 반복, 섞기, 스킵, 일시정지
+        for emoji in ["⏹️", "🔁", "🔀", "⏭️", "⏯️"]:
+            await msg.add_reaction(emoji)
 
 @bot.event
 async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id: return
     guild = bot.get_guild(payload.guild_id)
-    vc = guild.voice_client
-    if not vc: return
+    member = guild.get_member(payload.user_id)
+    
+    # [입국 심사]
+    if payload.channel_id == db["channels"]["verify"]:
+        if str(payload.emoji) == db["settings"]["verify_emoji"]:
+            role = discord.utils.get(guild.roles, name=db["settings"]["verify_role_name"])
+            if role: await member.add_roles(role)
+        return
 
-    # 음악 컨트롤러 로직
-    if payload.channel_id == db["channels"]["music"] or True: # 모든 채널 허용 혹은 지정 채널 제한
-        channel = bot.get_channel(payload.channel_id)
-        message = await channel.fetch_message(payload.message_id)
-        user = guild.get_member(payload.user_id)
-        
-        if message.author.id != bot.user.id: return
-        
+    # [음악 컨트롤]
+    if payload.channel_id == db["channels"]["music"] and payload.message_id == db["channels"]["music_msg"]:
+        vc = guild.voice_client
+        msg = await bot.get_channel(payload.channel_id).fetch_message(payload.message_id)
+        await msg.remove_reaction(payload.emoji, member) # 반응 즉시 삭제
+
+        if not vc: return
+
         emoji = str(payload.emoji)
         if emoji == "⏹️": 
+            music_state["queue"] = []
             await vc.disconnect()
-            await channel.send("⏹️ 음악을 정지하고 나갑니다.", delete_after=5)
+            await update_music_embed(guild, "⏹️ 음악이 정지되었습니다.")
         elif emoji == "🔁":
-            bot.music_loop = not bot.music_loop
-            await channel.send(f"🔁 반복 재생이 {'활성화' if bot.music_loop else '비활성화'} 되었습니다.", delete_after=5)
+            music_state["loop"] = not music_state["loop"]
+            await update_music_embed(guild, f"🔁 반복 재생 {'활성화' if music_state['loop'] else '비활성화'}")
         elif emoji == "🔀":
-            random.shuffle(db["music_queue"])
-            await channel.send("🔀 대기열이 섞였습니다.", delete_after=5)
+            random.shuffle(music_state["queue"])
+            await update_music_embed(guild, "🔀 대기열이 섞였습니다.")
         elif emoji == "⏭️":
             vc.stop()
-            await channel.send("⏭️ 곡을 스킵했습니다.", delete_after=5)
-        elif emoji == "⏸️":
-            if vc.is_playing(): 
-                vc.pause(); await channel.send("⏸️ 일시정지", delete_after=5)
-            elif vc.is_paused(): 
-                vc.resume(); await channel.send("▶️ 다시 재생", delete_after=5)
-        
-        await message.remove_reaction(payload.emoji, user)
+            await update_music_embed(guild, "⏭️ 다음 곡으로 넘어갑니다.")
+        elif emoji == "⏯️":
+            if vc.is_paused(): vc.resume(); await update_music_embed(guild, "▶️ 다시 재생합니다.")
+            else: vc.pause(); await update_music_embed(guild, "⏸️ 일시 정지되었습니다.")
+        return
 
-# --- [4] 중복방지 익명 투표 시스템 ---
-@bot.tree.command(name="투표", description="중복이 불가능한 익명 투표를 시작합니다.")
-async def vote_slash(interaction: discord.Interaction, 주제: str):
-    if interaction.channel_id != db["channels"]["vote"]: 
-        return await interaction.response.send_message("투표 전용 채널에서 사용하세요.", ephemeral=True)
-    
-    embed = discord.Embed(title="🗳️ 익명 투표 (중복 불가)", description=f"**주제: {주제}**\n\n⭕: 찬성\n❌: 반대", color=0xf1c40f)
-    embed.set_footer(text="투표 결과는 종료 후 마스터에게 상세 보고됩니다.")
-    
-    await interaction.response.send_message("투표를 게시합니다.", ephemeral=True)
-    msg = await interaction.channel.send(embed=embed)
-    await msg.add_reaction("⭕")
-    await msg.add_reaction("❌")
-    
-    db["active_votes"][str(msg.id)] = {
-        "topic": 주제, 
-        "voters": {}, # {user_id: choice}
-        "channel": interaction.channel_id
-    }
-    save_data()
+    # [투표 알림 및 중복 금지]
+    if str(payload.message_id) in db["active_votes"]:
+        if str(payload.emoji) in ["⭕", "❌"]:
+            vote_id = str(payload.message_id)
+            if vote_id not in db["vote_logs"]: db["vote_logs"][vote_id] = []
+            
+            # 중복 체크
+            if payload.user_id in db["vote_logs"][vote_id]:
+                msg = await bot.get_channel(payload.channel_id).fetch_message(payload.message_id)
+                await msg.remove_reaction(payload.emoji, member)
+                return
+            
+            db["vote_logs"][vote_id].append(payload.user_id)
+            save_data()
+            
+            # 마스터에게 알림
+            master = await bot.fetch_user(db["master_id"])
+            topic = db["active_votes"][vote_id]["topic"]
+            await master.send(f"🗳️ **[투표 알림]**\n유저: {member} ({member.id})\n항목: {payload.emoji}\n주제: {topic}")
 
-@bot.event
-async def on_reaction_add(reaction, user):
-    if user.bot: return
-    msg_id = str(reaction.message.id)
-    if msg_id in db["active_votes"]:
-        choice = str(reaction.emoji)
-        if choice not in ["⭕", "❌"]: return
-        
-        vote_data = db["active_votes"][msg_id]
-        
-        # 중복 투표 방지
-        if str(user.id) in vote_data["voters"]:
-            await reaction.message.remove_reaction(reaction.emoji, user)
-            return await user.send("⚠️ 이미 투표하셨습니다. 중복 투표는 불가능합니다.")
-        
-        # 투표 기록
-        vote_data["voters"][str(user.id)] = choice
-        save_data()
-        
-        # 본인에게만 확인 메시지
-        await user.send(f"✅ '{vote_data['topic']}' 투표에 '{choice}'로 참여 완료되었습니다.")
-        
-        # 마스터에게 실시간 알림 (누가 무엇을 했는지)
-        master = await bot.fetch_user(db["master_id"])
-        await master.send(f"🔔 [투표로그] {user.name}({user.id}) 님이 '{vote_data['topic']}'에 {choice} 투표함.")
-        
-        # 반응 즉시 삭제 (익명성 유지)
-        await reaction.message.remove_reaction(reaction.emoji, user)
+# --- [5] 전용 슬래시 명령어 ---
 
-@bot.tree.command(name="결과", description="마지막 투표를 종료하고 결과를 발표합니다.")
-async def result_slash(interaction: discord.Interaction):
+@bot.tree.command(name="음악", description="음악 전용 채널을 설정합니다.")
+async def set_music_channel(interaction: discord.Interaction, 채널: discord.TextChannel):
     if not is_auth(interaction): return
-    if not db["active_votes"]: return await interaction.response.send_message("활성화된 투표가 없습니다.", ephemeral=True)
-    
-    msg_id = list(db["active_votes"].keys())[-1]
-    data = db["active_votes"].pop(msg_id)
+    db["channels"]["music"] = 채널.id
+    db["channels"]["music_msg"] = None
     save_data()
-    
-    voters = data["voters"].values()
-    yes = list(voters).count("⭕")
-    no = list(voters).count("❌")
-    
-    result_embed = discord.Embed(title="🏁 투표 종료", description=f"**주제: {data['topic']}**", color=0x2ecc71)
-    result_embed.add_field(name="결과 합계", value=f"⭕ 찬성: {yes}표\n❌ 반대: {no}표", inline=False)
-    result_embed.set_footer(text=f"총 투표 인원: {len(voters)}명")
-    
-    await interaction.response.send_message(embed=result_embed)
+    await update_music_embed(interaction.guild, "🎶 음악 재생 준비 완료")
+    await interaction.response.send_message(f"✅ {채널.mention}이 음악 전용 채널로 설정되었습니다.")
 
-# --- [5] 관리 및 기타 기능 (기존 유지 및 보완) ---
-@bot.tree.command(name="잠금", description="시민 권한을 잠급니다.")
-async def lock(interaction: discord.Interaction, 채널: discord.TextChannel = None):
+@bot.tree.command(name="권한부여", description="새로운 관리자를 등록합니다.")
+async def auth_add(interaction: discord.Interaction, 유저: discord.Member):
+    if interaction.user.id != db["master_id"]: return await interaction.response.send_message("마스터 전용 권한입니다.", ephemeral=True)
+    if 유저.id not in db["admins"]:
+        db["admins"].append(유저.id); save_data()
+        await interaction.response.send_message(f"✅ {유저.mention} 님이 관리자로 등록되었습니다.")
+    else: await interaction.response.send_message("이미 관리자입니다.", ephemeral=True)
+
+@bot.tree.command(name="권한해제", description="관리자 권한을 회수합니다.")
+async def auth_remove(interaction: discord.Interaction, 유저: discord.Member):
+    if interaction.user.id != db["master_id"]: return await interaction.response.send_message("마스터 전용 권한입니다.", ephemeral=True)
+    if 유저.id in db["admins"]:
+        db["admins"].remove(유저.id); save_data()
+        await interaction.response.send_message(f"❌ {유저.mention} 님의 권한이 해제되었습니다.")
+    else: await interaction.response.send_message("등록된 관리자가 아닙니다.", ephemeral=True)
+
+@bot.tree.command(name="잠금", description="시민 역할의 채팅 권한을 차단합니다.")
+async def lock_slash(interaction: discord.Interaction, 채널: discord.TextChannel = None):
     if not is_auth(interaction): return
     target = 채널 or interaction.channel
     role = discord.utils.get(interaction.guild.roles, name=db["settings"]["verify_role_name"])
+    if not role: return await interaction.response.send_message("역할을 찾을 수 없습니다.", ephemeral=True)
     overwrites = target.overwrites_for(role)
     overwrites.send_messages = False
     overwrites.send_messages_in_threads = False
@@ -214,35 +240,113 @@ async def lock(interaction: discord.Interaction, 채널: discord.TextChannel = N
     await target.set_permissions(role, overwrite=overwrites)
     await interaction.response.send_message(f"🔒 {target.mention} 잠금 완료.")
 
-@bot.tree.command(name="해제", description="시민 권한을 해제합니다.")
-async def unlock(interaction: discord.Interaction, 채널: discord.TextChannel = None):
+@bot.tree.command(name="해제", description="시민 역할의 채팅 권한을 해제합니다.")
+async def unlock_slash(interaction: discord.Interaction, 채널: discord.TextChannel = None):
     if not is_auth(interaction): return
     target = 채널 or interaction.channel
     role = discord.utils.get(interaction.guild.roles, name=db["settings"]["verify_role_name"])
+    if not role: return await interaction.response.send_message("역할을 찾을 수 없습니다.", ephemeral=True)
     overwrites = target.overwrites_for(role)
     overwrites.send_messages = True
-    overwrites.send_messages_in_threads = None
-    overwrites.create_public_threads = None
-    overwrites.create_private_threads = None
     await target.set_permissions(role, overwrite=overwrites)
     await interaction.response.send_message(f"🔓 {target.mention} 해제 완료.")
 
-@bot.tree.command(name="청소", description="메시지를 삭제합니다.")
-async def clear(interaction: discord.Interaction, 수량: int):
+@bot.tree.command(name="투표", description="익명 투표 시작 (중복 금지)")
+async def vote_slash(interaction: discord.Interaction, 주제: str):
+    if interaction.channel_id != db["channels"]["vote"]: return await interaction.response.send_message("투표 채널 전용입니다.", ephemeral=True)
+    embed = discord.Embed(title="🗳️ 익명 투표", description=f"**{주제}**\n\n⭕: 찬성 | ❌: 반대\n(한 번만 투표 가능)", color=0xf1c40f)
+    await interaction.response.send_message("투표를 시작합니다.", ephemeral=True)
+    msg = await interaction.channel.send(embed=embed)
+    await msg.add_reaction("⭕"); await msg.add_reaction("❌")
+    db["active_votes"][str(msg.id)] = {"topic": 주제, "channel": interaction.channel_id}
+    save_data()
+
+@bot.tree.command(name="결과", description="투표 종료 및 결과 확인")
+async def result_slash(interaction: discord.Interaction):
+    if not is_auth(interaction): return
+    if not db["active_votes"]: return await interaction.response.send_message("진행 중인 투표가 없습니다.", ephemeral=True)
+    msg_id = list(db["active_votes"].keys())[-1]
+    data = db["active_votes"].pop(msg_id)
+    if msg_id in db["vote_logs"]: db["vote_logs"].pop(msg_id)
+    
+    ch = bot.get_channel(data["channel"])
+    try:
+        msg = await ch.fetch_message(int(msg_id))
+        results = {str(r.emoji): r.count - 1 for r in msg.reactions if str(r.emoji) in ["⭕", "❌"]}
+        await interaction.response.send_message(f"🏁 **최종 결과**\n주제: {data['topic']}\n⭕: {results.get('⭕',0)} | ❌: {results.get('❌',0)}")
+        await msg.delete()
+        save_data()
+    except:
+        await interaction.response.send_message("메시지를 찾을 수 없습니다.")
+
+@bot.tree.command(name="청소", description="메시지 청소")
+async def clear_slash(interaction: discord.Interaction, 수량: int):
     if not is_auth(interaction): return
     await interaction.response.defer(ephemeral=True)
     deleted = await interaction.channel.purge(limit=수량)
-    await interaction.followup.send(f"🧹 {len(deleted)}개의 메시지를 삭제했습니다.")
+    await interaction.followup.send(f"🧹 {len(deleted)}개 삭제 완료.")
 
-# --- [6] 서버 실행 및 Flask ---
+@bot.tree.command(name="명령어", description="명령어 목록 확인")
+async def help_slash(interaction: discord.Interaction):
+    embed = discord.Embed(title=f"🛡️ {AUTHOR} {VERSION} CONTROL", color=0x3498db)
+    embed.add_field(name="🎶 Music", value="`/음악` (채널 지정 후 채팅으로 재생)", inline=True)
+    embed.add_field(name="🗳️ Vote", value="`/투표`, `/결과`", inline=True)
+    embed.add_field(name="🛡️ Admin", value="`/청소`, `/잠금`, `/해제`, `/권한부여`, `/권한해제`, `/백업`, `/복구`", inline=False)
+    await interaction.response.send_message(embed=embed)
+
+# --- [나머지 기본 명령어 유지] ---
+@bot.tree.command(name="문의", description="개발자 건의")
+async def contact_slash(interaction: discord.Interaction, 내용: str):
+    master = await bot.fetch_user(db["master_id"])
+    await master.send(f"📩 [{interaction.user}] 문의: {내용}")
+    await interaction.response.send_message("✅ 전달 완료.", ephemeral=True)
+
+@bot.tree.command(name="현황", description="서버 인원")
+async def status_slash(interaction: discord.Interaction):
+    await interaction.response.send_message(f"📊 인원: **{interaction.guild.member_count}명**")
+
+@bot.tree.command(name="백업", description="데이터 백업")
+async def backup_slash(interaction: discord.Interaction):
+    if not is_auth(interaction): return
+    save_data(); await interaction.response.send_message("💾 백업 완료.")
+
+@bot.tree.command(name="복구", description="데이터 복구")
+async def restore_slash(interaction: discord.Interaction):
+    if not is_auth(interaction): return
+    load_data(); await interaction.response.send_message("🛠️ 복구 완료.")
+
+@bot.tree.command(name="생성", description="채널 생성")
+async def create_slash(interaction: discord.Interaction, 카테고리id: str, 이름: str):
+    if not is_auth(interaction): return
+    cat = bot.get_channel(int(카테고리id))
+    new_ch = await interaction.guild.create_text_channel(이름, category=cat)
+    await interaction.response.send_message(f"📂 {new_ch.mention} 생성.")
+
+@bot.tree.command(name="추방", description="유저 추방")
+async def kick_slash(interaction: discord.Interaction, 유저: discord.Member):
+    if not is_auth(interaction): return
+    await 유저.kick(); await interaction.response.send_message(f"👢 {유저.display_name} 추방.")
+
+@bot.tree.command(name="차단", description="유저 차단")
+async def ban_slash(interaction: discord.Interaction, 유저: discord.Member):
+    if not is_auth(interaction): return
+    await 유저.ban(); await interaction.response.send_message(f"🔨 {유저.display_name} 차단.")
+
+@bot.tree.command(name="삭제", description="채널 삭제")
+async def delete_slash(interaction: discord.Interaction, 채널: discord.TextChannel = None):
+    if not is_auth(interaction): return
+    target = 채널 or interaction.channel
+    await target.delete(); await interaction.response.send_message("삭제됨.", ephemeral=True)
+
+# --- [7] 서버 실행 ---
 @bot.event
 async def on_ready():
-    load_data()
+    load_data(); print_banner()
     print(f"{GREEN}[+] CHUNZA {VERSION} ONLINE: {bot.user}{RESET}")
 
 app = Flask('')
 @app.route('/')
-def home(): return "CHUNZA System Online"
+def home(): return "CHUNZA v1.9.0 Online"
 def run_app(): app.run(host='0.0.0.0', port=8080)
 Thread(target=run_app, daemon=True).start()
 
